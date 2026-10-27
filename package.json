@@ -1,0 +1,11 @@
+{
+  "name": "9router-mcp",
+  "version": "0.1.0",
+  "description": "MCP server for a local 9router gateway: models, headroom, chat, probes, usage, search and fetch with key redaction",
+  "license": "MIT",
+  "type": "module",
+  "main": "index.ts",
+  "scripts": {
+    "test": "for f in *.test.ts; do bun test $f || exit 1; done"
+  }
+}
