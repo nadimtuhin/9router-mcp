@@ -39,6 +39,10 @@ const router = createRouter({
   }
 });
 async function handle(line: string) {
+  try { await dispatch(line); }
+  catch { process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: null, error: { code: -32603, message: 'Internal error' } }) + '\n'); }
+}
+async function dispatch(line: string) {
   let request: any;
   const send = (payload: any) => process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: request?.id ?? null, ...payload }) + '\n');
   try { request = JSON.parse(line); } catch { send({ error: { code: -32700, message: 'Parse error' } }); return; }
@@ -48,7 +52,7 @@ async function handle(line: string) {
   if (request.method === 'ping') { send({ result: {} }); return; }
   if (request.method === 'tools/list') { send({ result: { tools: Object.entries(definitions).map(([name, d]) => ({ name, description: d.description, inputSchema: { type: 'object', properties: d.properties, required: d.required, additionalProperties: false } })) } }); return; }
   if (request.method !== 'tools/call') { send({ error: { code: -32601, message: 'Method not found' } }); return; }
-  const d = definitions[request.params?.name];
+  const d = Object.hasOwn(definitions, request.params?.name) ? definitions[request.params.name] : undefined;
   const args = request.params?.arguments ?? {};
   if (!d || !valid(args, { type: 'object', ...d })) { send({ error: { code: -32602, message: 'Invalid tool arguments' } }); return; }
   const result = await router.call(request.params.name, args);

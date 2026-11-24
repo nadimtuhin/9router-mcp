@@ -96,7 +96,7 @@ export function createRouter(options: Options) {
     });
     return healthy ?? null;
   }
-  async function call(name: string, args: Record<string, any> = {}, signal: AbortSignal): Promise<any> {
+  async function call(name: string, args: Record<string, any> = {}, signal: AbortSignal, deadline = Infinity): Promise<any> {
     const requestWithDeadline = (path: string, init: RequestInit = {}, timeout = 4000) => request(path, init, timeout, signal);
     if (['router_fetch', 'router_search'].includes(name) && /firecrawl/i.test(args.provider ?? '') && args.allow_firecrawl !== true) return { error: 'firecrawl_requires_opt_in' };
     if (name === 'router_chat' && (args.model.startsWith('cc/') || ['claude-fusion', 'sonnet-fushion', 'free-fushion'].includes(args.model)) && !(await options.headroom()).some(p => p.pool === 'claude' && p.status === 'SPEND')) return { error: 'claude_not_spend' };
@@ -134,20 +134,21 @@ export function createRouter(options: Options) {
       const start = Date.now();
       const provider = args.provider ?? 'jina-reader';
       const response = await requestWithDeadline(name === 'router_search' ? '/v1/search' : '/v1/web/fetch', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(name === 'router_search' ? { provider, query: args.query } : { provider, url: args.url }) });
-      const body = await response.json();
+      const body = await response.json().catch(() => undefined);
       await mkdir(options.cache, { recursive: true });
       await log({ ts: new Date().toISOString(), model: provider, pool: provider, status: response.status, latency_ms: Date.now() - start, tokens: 0 });
-      return response.ok ? body : { error: 'upstream_error', status: response.status };
+      return response.ok && body !== undefined ? body : { error: 'upstream_error', status: response.status };
     }
     if (name === 'router_usage') {
       if (!await Bun.file(options.db).exists()) return { rows: [], note: 'db_missing' };
       const since = args.since ?? 'today';
-      const date = since === 'today' ? new Date().toISOString().slice(0, 10) : new Date(since).toISOString();
-      const sql = `SELECT k.name AS who, u.provider, count(*) AS calls, sum(u.inputTokens + u.outputTokens) / 1000000.0 AS Mtok FROM usageHistory u LEFT JOIN apiKeys k ON k.id = u.apiKeyId WHERE u.timestamp >= '${date}' GROUP BY k.name, u.provider`;
-      const proc = Bun.spawn(['sqlite3', '-readonly', '-json', options.db, sql], { stdout: 'pipe', stderr: 'ignore', timeout: 3000 });
-      const output = await new Response(proc.stdout).text();
-      if (await proc.exited !== 0) return { error: 'usage_unavailable' };
-      return { rows: JSON.parse(output || '[]') };
+      const date = since === 'today' ? new Date().toISOString().slice(0, 10) : Number.isFinite(Date.parse(since)) ? new Date(since).toISOString() : null;
+      if (date === null) return { error: 'invalid_since' };
+      let db: Database | undefined;
+      try {
+        db = new Database(options.db, { readonly: true });
+        return { rows: db.query('SELECT k.name AS who, u.provider, count(*) AS calls, sum(u.inputTokens + u.outputTokens) / 1000000.0 AS Mtok FROM usageHistory u LEFT JOIN apiKeys k ON k.id = u.apiKeyId WHERE u.timestamp >= ? GROUP BY k.name, u.provider').all(date) };
+      } catch { return { error: 'usage_unavailable' }; } finally { db?.close(); }
     }
     if (name === 'router_headroom') {
       const state = await limits();
@@ -168,6 +169,7 @@ export function createRouter(options: Options) {
       const start = Date.now();
       let response: Response | undefined;
       let body: any;
+      let attempts = 1;
       try {
       const send = async () => {
         const reply = await requestWithDeadline('/v1/chat/completions', {
@@ -180,20 +182,20 @@ export function createRouter(options: Options) {
       response = await send();
       if ([429, 503].includes(response.status)) {
         const wait = retryMs(response);
-        if (wait !== null && wait <= 20000) {
-          await log({ ts: new Date().toISOString(), model: args.model, pool, status: response.status, latency_ms: Date.now() - start, tokens: 0 });
+        if (wait !== null && wait <= 20000 && Date.now() + wait + 4000 <= deadline) {
           await Bun.sleep(wait);
+          attempts++;
           response = await send();
         }
       }
-      body = await response.json();
+      body = response.ok ? await response.json() : await response.arrayBuffer().then(() => undefined, () => undefined);
       } finally {
       await limits(state => {
         const p = state.pools[pool];
         p.in_flight--;
       });
       await mkdir(options.cache, { recursive: true });
-      await log({ ts: new Date().toISOString(), model: args.model, pool: args.model.split('/')[0], status: response?.status ?? 'router_down', latency_ms: Date.now() - start, tokens: body?.usage?.total_tokens ?? 0 });
+      await log({ ts: new Date().toISOString(), model: args.model, pool: args.model.split('/')[0], status: response?.status ?? 'router_down', latency_ms: Date.now() - start, tokens: body?.usage?.total_tokens ?? 0, attempts });
       }
       if (response.status === 429 || response.status === 503) return { error: 'rate_limited', alternative: await alternative(args.model) };
       if (!response.ok) return { error: 'upstream_error', status: response.status };
@@ -218,10 +220,11 @@ export function createRouter(options: Options) {
   }
   return { async call(name: string, args: Record<string, any> = {}) {
     const controller = new AbortController();
+    const deadline = Date.now() + 9000;
     const timer = setTimeout(() => controller.abort(), 9000);
     try {
       const aborted = new Promise<never>((_, reject) => controller.signal.addEventListener('abort', () => reject(new Error('router_down')), { once: true }));
-      const work = (async () => { const clean = await redactor(); return clean(await call(name, args, controller.signal)); })();
+      const work = (async () => { const clean = await redactor(); return clean(await call(name, args, controller.signal, deadline)); })();
       work.catch(() => {});
       return await Promise.race([work, aborted]);
     }

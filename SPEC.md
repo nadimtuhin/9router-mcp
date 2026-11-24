@@ -11,13 +11,13 @@ Same shape as the pi MCP: no state of its own beyond the files listed here, no w
    - Refuses `cc/` models and the claude-fusion/sonnet-fushion/free-fushion combos unless headroom shows claude SPEND.
    - Refuses fusion combos when called more than 3 times in 10 min (never in loops).
 4. `router_probe(models[])` -> one 8-token call per model, one at a time, 30 s timeout: ok/429/503/400 and latency.
-5. `router_usage(since="today")` -> who/provider/calls/Mtok from usageHistory via `sqlite3 -readonly`. Key names only, never key values.
+5. `router_usage(since="today")` -> who/provider/calls/Mtok from usageHistory via a read-only `bun:sqlite` connection. Key names only, never key values.
 6. `router_search(provider, query)` and `router_fetch(url, provider="jina-reader")` -> thin wrappers over `/v1/search` and `/v1/web/fetch`. firecrawl is refused unless the caller passes `allow_firecrawl=true`.
 
 ## Rate limits (shared with the pi MCP)
 - Both MCPs use one file, `~/.cache/pi-runs/limits.json`, for caps, cooldowns and learned caps. Same rules as the pi MCP spec: default 6 concurrent calls per pool, cooldown from retry-after or 5 min doubling to 60 min, learned cap N-1.
 - On 429/503, router_chat honors retry-after once if it is 20 s or less. Otherwise it returns `rate_limited` with the next model in the same task row whose pool is healthy. It never silently switches models.
-- Each call appends one row to `~/.cache/pi-runs/calls.jsonl`: ts, model, pool, status, latency_ms, tokens. Prompts are never logged.
+- Each call appends one row to `~/.cache/pi-runs/calls.jsonl`: ts, model, pool, status, latency_ms, tokens. Prompts are never logged. A router_chat retry stays one row: status is the final status and `attempts` is 2. Rows without `attempts` (older rows) count as one attempt.
 
 ## Never
 - Print or return a key. Return the Bearer header. Edit `data.sqlite`. Restart launchd. Call the remote router URL.
