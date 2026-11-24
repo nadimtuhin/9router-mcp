@@ -96,7 +96,7 @@ export function createRouter(options: Options) {
     });
     return healthy ?? null;
   }
-  async function call(name: string, args: Record<string, any> = {}, signal: AbortSignal): Promise<any> {
+  async function call(name: string, args: Record<string, any> = {}, signal: AbortSignal, deadline = Infinity): Promise<any> {
     const requestWithDeadline = (path: string, init: RequestInit = {}, timeout = 4000) => request(path, init, timeout, signal);
     if (['router_fetch', 'router_search'].includes(name) && /firecrawl/i.test(args.provider ?? '') && args.allow_firecrawl !== true) return { error: 'firecrawl_requires_opt_in' };
     if (name === 'router_chat' && (args.model.startsWith('cc/') || ['claude-fusion', 'sonnet-fushion', 'free-fushion'].includes(args.model)) && !(await options.headroom()).some(p => p.pool === 'claude' && p.status === 'SPEND')) return { error: 'claude_not_spend' };
@@ -181,7 +181,7 @@ export function createRouter(options: Options) {
       response = await send();
       if ([429, 503].includes(response.status)) {
         const wait = retryMs(response);
-        if (wait !== null && wait <= 20000) {
+        if (wait !== null && wait <= 20000 && Date.now() + wait + 4000 <= deadline) {
           await log({ ts: new Date().toISOString(), model: args.model, pool, status: response.status, latency_ms: Date.now() - start, tokens: 0 });
           await Bun.sleep(wait);
           response = await send();
@@ -219,10 +219,11 @@ export function createRouter(options: Options) {
   }
   return { async call(name: string, args: Record<string, any> = {}) {
     const controller = new AbortController();
+    const deadline = Date.now() + 9000;
     const timer = setTimeout(() => controller.abort(), 9000);
     try {
       const aborted = new Promise<never>((_, reject) => controller.signal.addEventListener('abort', () => reject(new Error('router_down')), { once: true }));
-      const work = (async () => { const clean = await redactor(); return clean(await call(name, args, controller.signal)); })();
+      const work = (async () => { const clean = await redactor(); return clean(await call(name, args, controller.signal, deadline)); })();
       work.catch(() => {});
       return await Promise.race([work, aborted]);
     }
