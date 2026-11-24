@@ -11,7 +11,7 @@ Same shape as the pi MCP: no state of its own beyond the files listed here, no w
    - Refuses `cc/` models and the claude-fusion/sonnet-fushion/free-fushion combos unless headroom shows claude SPEND.
    - Refuses fusion combos when called more than 3 times in 10 min (never in loops).
 4. `router_probe(models[])` -> one 8-token call per model, one at a time, 30 s timeout: ok/429/503/400 and latency.
-5. `router_usage(since="today")` -> who/provider/calls/Mtok from usageHistory via `sqlite3 -readonly`. Key names only, never key values.
+5. `router_usage(since="today")` -> who/provider/calls/Mtok from usageHistory via a read-only `bun:sqlite` connection. Key names only, never key values.
 6. `router_search(provider, query)` and `router_fetch(url, provider="jina-reader")` -> thin wrappers over `/v1/search` and `/v1/web/fetch`. firecrawl is refused unless the caller passes `allow_firecrawl=true`.
 
 ## Rate limits (shared with the pi MCP)

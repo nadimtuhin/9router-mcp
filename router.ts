@@ -142,12 +142,13 @@ export function createRouter(options: Options) {
     if (name === 'router_usage') {
       if (!await Bun.file(options.db).exists()) return { rows: [], note: 'db_missing' };
       const since = args.since ?? 'today';
-      const date = since === 'today' ? new Date().toISOString().slice(0, 10) : new Date(since).toISOString();
-      const sql = `SELECT k.name AS who, u.provider, count(*) AS calls, sum(u.inputTokens + u.outputTokens) / 1000000.0 AS Mtok FROM usageHistory u LEFT JOIN apiKeys k ON k.id = u.apiKeyId WHERE u.timestamp >= '${date}' GROUP BY k.name, u.provider`;
-      const proc = Bun.spawn(['sqlite3', '-readonly', '-json', options.db, sql], { stdout: 'pipe', stderr: 'ignore', timeout: 3000 });
-      const output = await new Response(proc.stdout).text();
-      if (await proc.exited !== 0) return { error: 'usage_unavailable' };
-      return { rows: JSON.parse(output || '[]') };
+      const date = since === 'today' ? new Date().toISOString().slice(0, 10) : Number.isFinite(Date.parse(since)) ? new Date(since).toISOString() : null;
+      if (date === null) return { error: 'invalid_since' };
+      let db: Database | undefined;
+      try {
+        db = new Database(options.db, { readonly: true });
+        return { rows: db.query('SELECT k.name AS who, u.provider, count(*) AS calls, sum(u.inputTokens + u.outputTokens) / 1000000.0 AS Mtok FROM usageHistory u LEFT JOIN apiKeys k ON k.id = u.apiKeyId WHERE u.timestamp >= ? GROUP BY k.name, u.provider').all(date) };
+      } catch { return { error: 'usage_unavailable' }; } finally { db?.close(); }
     }
     if (name === 'router_headroom') {
       const state = await limits();
