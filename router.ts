@@ -169,6 +169,7 @@ export function createRouter(options: Options) {
       const start = Date.now();
       let response: Response | undefined;
       let body: any;
+      let attempts = 1;
       try {
       const send = async () => {
         const reply = await requestWithDeadline('/v1/chat/completions', {
@@ -182,8 +183,8 @@ export function createRouter(options: Options) {
       if ([429, 503].includes(response.status)) {
         const wait = retryMs(response);
         if (wait !== null && wait <= 20000 && Date.now() + wait + 4000 <= deadline) {
-          await log({ ts: new Date().toISOString(), model: args.model, pool, status: response.status, latency_ms: Date.now() - start, tokens: 0 });
           await Bun.sleep(wait);
+          attempts++;
           response = await send();
         }
       }
@@ -194,7 +195,7 @@ export function createRouter(options: Options) {
         p.in_flight--;
       });
       await mkdir(options.cache, { recursive: true });
-      await log({ ts: new Date().toISOString(), model: args.model, pool: args.model.split('/')[0], status: response?.status ?? 'router_down', latency_ms: Date.now() - start, tokens: body?.usage?.total_tokens ?? 0 });
+      await log({ ts: new Date().toISOString(), model: args.model, pool: args.model.split('/')[0], status: response?.status ?? 'router_down', latency_ms: Date.now() - start, tokens: body?.usage?.total_tokens ?? 0, attempts });
       }
       if (response.status === 429 || response.status === 503) return { error: 'rate_limited', alternative: await alternative(args.model) };
       if (!response.ok) return { error: 'upstream_error', status: response.status };

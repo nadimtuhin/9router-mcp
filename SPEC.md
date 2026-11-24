@@ -17,7 +17,7 @@ Same shape as the pi MCP: no state of its own beyond the files listed here, no w
 ## Rate limits (shared with the pi MCP)
 - Both MCPs use one file, `~/.cache/pi-runs/limits.json`, for caps, cooldowns and learned caps. Same rules as the pi MCP spec: default 6 concurrent calls per pool, cooldown from retry-after or 5 min doubling to 60 min, learned cap N-1.
 - On 429/503, router_chat honors retry-after once if it is 20 s or less. Otherwise it returns `rate_limited` with the next model in the same task row whose pool is healthy. It never silently switches models.
-- Each call appends one row to `~/.cache/pi-runs/calls.jsonl`: ts, model, pool, status, latency_ms, tokens. Prompts are never logged.
+- Each call appends one row to `~/.cache/pi-runs/calls.jsonl`: ts, model, pool, status, latency_ms, tokens. Prompts are never logged. A router_chat retry stays one row: status is the final status and `attempts` is 2. Rows without `attempts` (older rows) count as one attempt.
 
 ## Never
 - Print or return a key. Return the Bearer header. Edit `data.sqlite`. Restart launchd. Call the remote router URL.
