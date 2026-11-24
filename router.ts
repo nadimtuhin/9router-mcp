@@ -134,10 +134,10 @@ export function createRouter(options: Options) {
       const start = Date.now();
       const provider = args.provider ?? 'jina-reader';
       const response = await requestWithDeadline(name === 'router_search' ? '/v1/search' : '/v1/web/fetch', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(name === 'router_search' ? { provider, query: args.query } : { provider, url: args.url }) });
-      const body = await response.json();
+      const body = await response.json().catch(() => undefined);
       await mkdir(options.cache, { recursive: true });
       await log({ ts: new Date().toISOString(), model: provider, pool: provider, status: response.status, latency_ms: Date.now() - start, tokens: 0 });
-      return response.ok ? body : { error: 'upstream_error', status: response.status };
+      return response.ok && body !== undefined ? body : { error: 'upstream_error', status: response.status };
     }
     if (name === 'router_usage') {
       if (!await Bun.file(options.db).exists()) return { rows: [], note: 'db_missing' };
@@ -186,7 +186,7 @@ export function createRouter(options: Options) {
           response = await send();
         }
       }
-      body = await response.json();
+      body = response.ok ? await response.json() : await response.arrayBuffer().then(() => undefined, () => undefined);
       } finally {
       await limits(state => {
         const p = state.pools[pool];
